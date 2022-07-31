@@ -1,10 +1,16 @@
+/* Weatherstation
+ * PCE Instruments PCE-WS P 
+ * Author:  Christian Langrock
+ * Date:    2022-July-31
+ */
+
 #include <ESP8266WiFi.h>
 #include "myconfig.h"
 #include "Output_relay.h"
 #include "1-wire_temperature.h"
 #include "OTAupdate.h"
-// #include <ESP8266HTTPClient.h>
-// #include <ESP8266httpUpdate.h>
+#include "windsensor.h"
+//#include "datatypes.h"
 #include <PubSubClient.h>
 
 // please install the library PubSubClient, TaskScheduler
@@ -16,26 +22,19 @@
 #define _TASK_TIMECRITICAL
 #include <TaskScheduler.h>
 
-unsigned long  next_timestamp = 0;
-volatile unsigned long i = 0;
-float wind = 0;
-float last_wind = 0;
-int count = 0;
-volatile unsigned long last_micros;
-long debouncing_time = 5; //in millis
-//int input_pin_wind = 13;
-char charBuffer[32];
+float windspeed  {0.0};
+float last_wind_MQTT  {0.0};
+int count_MQTT_Wind {0};
+float returnTemperature {0.0};
+int numberTemperatureSensor {0};
+
+
+// arrays to hold device addresses
+struct DeviceAddress_array Thermometers;
 
 WiFiClient espClient;
 PubSubClient client(espClient);
 
-void ICACHE_RAM_ATTR Interrupt()
-{
-  if((long)(micros() - last_micros) >= debouncing_time * 1000) {
-    i++;
-    last_micros = micros();
-  }
-}
 
 // ************************* Tasks ******************************
 
@@ -55,66 +54,89 @@ Task tRelayOut (2000, TASK_FOREVER, tRelayOutCallback, &runnerHPR);
 Task t_1_wire_measure (5000, TASK_FOREVER, t_1_wire_measureCallback, &runner);
 
 void tWindCallback() {
+  if (debugOutput){
     Serial.print("task Wind: ");
     Serial.println(millis());
-    
-  detachInterrupt(input_pin_wind);
-    count++; 
-    if(i == 0)
-      wind = 0.0;
-    else
-      wind = (i * 0.8) + 3; // PCE Instruments PCE-WS P 
-    if(last_wind - wind > 0.8 || last_wind - wind < -0.8 || count >= 10){
-      if(debugOutput){
-        Serial.print("Wind: ");
-        Serial.print(wind);
-        Serial.println(" km/h");
-      }
-      String strBuffer;
-      strBuffer =  String(wind);
-      strBuffer.toCharArray(charBuffer,10);
-      
-      char* strMQTTTopic {mqtt_topic_prefix};
-      char* chrSubTopic {"/wind"};
-      strcat(strMQTTTopic, chrSubTopic);
-      
-      if (!client.publish(strMQTTTopic, charBuffer, false))
-      {
-        if(debugOutput) Serial.print("Can not publish to MQTT Broker");
-      }
-      
-      count = 0;
-    }
-    i = 0;
-    last_wind = wind;
-
-    attachInterrupt(input_pin_wind,Interrupt,RISING);
+  }
+    // read windsensor
+    windspeed = windsensor();
+ 
 }
 
+// MQTT communication
 void tMQTTCallback() {
+  if (debugOutput){
     Serial.print("task MQTT: ");
     Serial.println(millis());
+  }
     // do_update(); OTA update disabled
     client.setServer(mqtt_host, mqtt_port);
 
     if (!client.connected()) {
       reconnect();
     }
+       // publish wind speed
+       count_MQTT_Wind++;
+       if (last_wind_MQTT - windspeed > 0.8 || last_wind_MQTT - windspeed < -0.8 || count_MQTT_Wind >= 10){
+             MQTT_puplish_float (strMQTTTopic_wind, windspeed);
+             count_MQTT_Wind = 0;
+       }
+
       client.loop();
+     
 }
 
+// relay output
 void tRelayOutCallback(){
+  if (debugOutput){
    Serial.print("task Relay output: ");
-   //Serial.println(millis());
-   wind_max(wind);
+   Serial.println(millis());
+  }
+   wind_max(windspeed);
 }
   
 void t_1_wire_measureCallback(){
+
+  char* chrBuffer_Temp {""};
+  char chrNumber[2];
+
   if (debugOutput){
     Serial.print("task 1-Wire temprature: "); 
     Serial.println(millis());
+      Serial.print("Prefix: ");
+  Serial.println(strMQTTTopic_Temp);
   }
-  one_wire_measure(); 
+  int deviceNumber {0};
+  
+  for (uint8_t i = 0; i < numberTemperatureSensor; i++){
+    returnTemperature = 0.0;
+    returnTemperature = read_Temperature(i); 
+    chrBuffer_Temp = strMQTTTopic_Temp;
+    //chrNumber[1] = "";
+    String strBufferT = String(i);
+    strBufferT.toCharArray(chrNumber,2);
+    strcat(chrBuffer_Temp, chrNumber);
+    Serial.println(chrBuffer_Temp);
+    if (debugOutput){
+      Serial.print("Temp_");
+      Serial.print(i, DEC);
+      Serial.print(": ");
+      Serial.println(returnTemperature, DEC);
+    }
+    MQTT_puplish_float (chrBuffer_Temp, returnTemperature);
+  }
+  /*
+      char* strMQTTTopic_temp {mqtt_topic_prefix};
+      char* chrSubTopic {"/temp"};
+      char chrNumber[6];
+      String strBuffer;
+      strBuffer = String(number);
+      strBuffer.toCharArray(chrNumber,6);
+
+      strcat(strMQTTTopic_temp, chrSubTopic);
+      strcat(strMQTTTopic_temp,"_");
+      strcat(strMQTTTopic_temp, chrNumber);
+  */
 }
 
 
@@ -164,13 +186,15 @@ void setup() {
   // We start by connecting to a WiFi network
   initWiFi();
 
+  initWindsensor();
+
   // set priority, higher is better
-  tMQTT.setId(100);
+  tMQTT.setId(50);
   t_1_wire_measure.setId(150);
   tWind.setId(600);
-  tRelayOut.setId(601);
+  tRelayOut.setId(500);
   
-  delay(500);
+  delay(5000);
 
   runner.setHighPriorityScheduler(&runnerHPR); 
   runner.enableAll(true); // this will recursively enable the higher priority tasks as well
@@ -178,7 +202,20 @@ void setup() {
   client.setServer(mqtt_host, mqtt_port);
 //  do_update();
 
-  Init_temprature();
+  numberTemperatureSensor = Init_temprature();
+ // copy on-wire addresses to a byte array
+ Thermometers = Temperature_storeDeviceAddress();
+ if (debugOutput){
+    for (uint8_t i = 0; i < numberTemperatureSensor; i++ ){
+      Serial.print("Sensor Adress ");
+      Serial.print(i);
+      Serial.print(": ");
+      for (uint8_t y = 0; y < 8; y++){
+        Serial.print(Thermometers.Address[i][y], HEX);
+      }
+      Serial.println(" ");
+    }
+ }
   reconnect();
   
   attachInterrupt(input_pin_wind,Interrupt,RISING);
@@ -207,7 +244,7 @@ void reconnect() {
       // Once connected, publish an announcement...
       //client.publish("outTopic", "hello world");
       // ... and resubscribe
-      client.subscribe("inTopic");
+      //client.subscribe("inTopic");
     } else {
       if(debugOutput){
         Serial.print("failed, rc=");
@@ -216,4 +253,25 @@ void reconnect() {
       }
     }
   }
+}
+
+bool MQTT_puplish_float (char* strMQTTTopic, float fMQTTValue) {
+      bool Com_Ok  {false};
+      char charBuffer[32];
+      String strBuffer;
+      strBuffer =  String(fMQTTValue);
+      strBuffer.toCharArray(charBuffer,10);
+      
+      if (!client.publish(strMQTTTopic, charBuffer, false))
+      {
+        if(debugOutput) {
+          Serial.print("Can not publish to MQTT Broker: ");
+          Serial.print(strMQTTTopic);
+          Serial.print(" ");
+        }
+      }
+      else{
+        Com_Ok = true;
+      }
+      return Com_Ok;
 }

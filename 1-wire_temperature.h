@@ -1,7 +1,23 @@
+/* one-wire temperature (DS18B20)
+ *  
+ * Author:  Christian Langrock
+ * Date:    2022-July-31
+ */
+
+
 #include <OneWire.h>            // OneWire-Bibliothek einbinden
 #include <DallasTemperature.h>  // DS18B20-Bibliothek einbinden
+#include "datatypes.h"
 
 
+DeviceAddress Thermometer[64];
+
+// Assign address manually. The addresses below will need to be changed
+// to valid device addresses on your bus. Device address can be retrieved
+// by using either oneWire.search(deviceAddress) or individually via
+// sensors.getAddress(deviceAddress, index)
+// DeviceAddress insideThermometer = { 0x28, 0x1D, 0x39, 0x31, 0x2, 0x0, 0x0, 0xF0 };
+// DeviceAddress outsideThermometer   = { 0x28, 0x3F, 0x1C, 0x31, 0x2, 0x0, 0x0, 0x2 };
 
 int numberOfDevices; // Number of temperature devices found
 
@@ -9,6 +25,10 @@ DeviceAddress tempDeviceAddress; // We'll use this variable to store a found dev
 
 OneWire oneWire(DS18B20_PIN);          // OneWire Referenz setzen
 DallasTemperature sensors(&oneWire);   // DS18B20 initialisieren
+
+char* strMQTTTopic_Temp;
+char* chrSubTopic_Temp {"/temp_"};
+
 
 // function to print a device address
 void printAddress(DeviceAddress deviceAddress)
@@ -22,24 +42,41 @@ void printAddress(DeviceAddress deviceAddress)
 
 
 // function to print the temperature for a device
-void printTemperature(DeviceAddress deviceAddress)
-{
-  float tempC = sensors.getTempC(deviceAddress);
-  if (tempC == DEVICE_DISCONNECTED_C)
-  {
-    Serial.println("Error: Could not read temperature data");
-    return;
-  }
-  Serial.print("Temp C: ");
-  Serial.print(tempC);
-  Serial.print(" ");  // Hier müssen wir ein wenig tricksen
-  Serial.write(176);  // um das °-Zeichen korrekt darzustellen
-  Serial.println("C");
+float read_Temperature(int deviceNumber){
+
+  if (deviceNumber <= numberOfDevices){
+      float  tempC = sensors.getTempC(Thermometer[deviceNumber]);
+      if (tempC == DEVICE_DISCONNECTED_C)
+        {
+          if (debugOutput) Serial.println("Error: Could not read temperature data");
+          return 0.0;
+        }
+      else{
+       if (debugOutput){
+          Serial.print("Temp C: ");
+          Serial.print(tempC);
+          Serial.print(" ");  // Hier müssen wir ein wenig tricksen
+          Serial.write(176);  // um das °-Zeichen korrekt darzustellen
+          Serial.println("C");
+          }
+        return tempC;
+      }
+    }
+  return 0.0;
 }
-void Init_temprature() {  
+
+int Init_temprature() {  
   sensors.begin();  // DS18B20 starten
-
-
+  strMQTTTopic_Temp = mqtt_topic_prefix;
+  strcpy(chrSubTopic_Temp, "/Temp_");
+  strcpy(strMQTTTopic_Temp, mqtt_topic_prefix);
+  strcat(strMQTTTopic_Temp, chrSubTopic_Temp);
+    if(debugOutput){
+    Serial.print("Prefix MQTT temperature: ");
+    Serial.println(chrSubTopic_Temp);
+    Serial.println(mqtt_topic_prefix);
+    Serial.println(strMQTTTopic_Temp);
+  }
   // Grab a count of devices on the wire
   numberOfDevices = sensors.getDeviceCount();
   Serial.print("1- wire Sensoren: "); 
@@ -56,56 +93,47 @@ void Init_temprature() {
   for (int i = 0; i < numberOfDevices; i++)
   {
     // Search the wire for address
-    if (sensors.getAddress(tempDeviceAddress, i))
+    if (sensors.getAddress(Thermometer[i], i))
     {
-      Serial.print("Found device ");
-      Serial.print(i, DEC);
-      Serial.print(" with address: ");
-      printAddress(tempDeviceAddress);
-      Serial.println();
-
-      Serial.print("Setting resolution to ");
-      Serial.println(TEMPERATURE_PRECISION, DEC);
-
+       if(debugOutput){
+        Serial.print("Found device ");
+        Serial.print(i, DEC);
+        Serial.print(" with address: ");
+        printAddress(Thermometer[i]);
+        Serial.println();
+        Serial.print("Setting resolution to ");
+        Serial.println(TEMPERATURE_PRECISION, DEC);
+        }
       // set the resolution to TEMPERATURE_PRECISION bit (Each Dallas/Maxim device is capable of several different resolutions)
-      sensors.setResolution(tempDeviceAddress, TEMPERATURE_PRECISION);
-
-      Serial.print("Resolution actually set to: ");
-      Serial.print(sensors.getResolution(tempDeviceAddress), DEC);
-      Serial.println();
+      sensors.setResolution(Thermometer[i], TEMPERATURE_PRECISION);
+      if(debugOutput){
+          Serial.print("Resolution actually set to: ");
+          Serial.print(sensors.getResolution(Thermometer[i]), DEC);
+          Serial.println();
+      }
     } else {
-      Serial.print("Found ghost device at ");
-      Serial.print(i, DEC);
-      Serial.print(" but could not detect address. Check power and cabling");
+      if(debugOutput){
+        Serial.print("Found ghost device at ");
+        Serial.print(i, DEC);
+        Serial.print(" but could not detect address. Check power and cabling");
+        }
     }
   }
 
-  
+  return numberOfDevices;
 }
 
-void one_wire_measure(){
 
- // call sensors.requestTemperatures() to issue a global temperature
-  // request to all devices on the bus
-  Serial.print("Requesting temperatures...");
-  sensors.requestTemperatures(); // Send the command to get temperatures
-  Serial.println("DONE");
+// as you read the device addresses with one of the many examples call this procdure
+// to store the Device Address in the DS18B20_DeviceByteAddresses array.
 
-
-  // Loop through each device, print out temperature data
-  for (int i = 0; i < numberOfDevices; i++)
-  {
-    // Search the wire for address
-    if (sensors.getAddress(tempDeviceAddress, i))
-    {
-      // Output the device ID
-      Serial.print("Temperature for device: ");
-      Serial.println(i, DEC);
-
-      // It responds almost immediately. Let's print out the data
-      printTemperature(tempDeviceAddress); // Use a simple function to print out the data
-    }
-    //else ghost device! Check your power requirements and cabling
-
+struct DeviceAddress_array Temperature_storeDeviceAddress(void) {
+  // function to convert a device address in a printable string
+  struct DeviceAddress_array outAddress;
+  for (uint8_t j = 0; j < numberOfDevices; j++){
+      for (uint8_t i = 0; i < 8; i++) {
+        outAddress.Address[j][i] = Thermometer[j][i];
+      }
   }
+  return outAddress;
 }

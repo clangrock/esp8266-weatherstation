@@ -1,3 +1,8 @@
+/* Output with relay
+ * 
+ * Author:  Christian Langrock
+ * Date:    2022-July-31
+ */
 
 int timeMaxWindSpeed = 0;
 long timeMaxMaxWindSpeed = 0;
