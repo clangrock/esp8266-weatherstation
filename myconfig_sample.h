@@ -38,5 +38,5 @@ constexpr char* update_uri = "/path/update.php";
 /*************************************************/
 constexpr char* mqtt_host { "xxx.xxx.xxx.xxx" };
 constexpr char* mqtt_id { "ESP8266-Anemometer" };
-constexpr char* mqtt_topic_prefix { "/weatherstation/wind" };
+constexpr char* mqtt_topic_prefix { "/weatherstation" };
 constexpr int mqtt_port { 1883 };

@@ -73,7 +73,12 @@ void tWindCallback() {
       String strBuffer;
       strBuffer =  String(wind);
       strBuffer.toCharArray(charBuffer,10);
-      if (!client.publish(mqtt_topic_prefix, charBuffer, false))
+      
+      char* strMQTTTopic {mqtt_topic_prefix};
+      char* chrSubTopic {"/wind"};
+      strcat(strMQTTTopic, chrSubTopic);
+      
+      if (!client.publish(strMQTTTopic, charBuffer, false))
       {
         if(debugOutput) Serial.print("Can not publish to MQTT Broker");
       }
