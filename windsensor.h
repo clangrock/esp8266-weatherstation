@@ -32,7 +32,6 @@ void initWindsensor() {
   cycleTime_old = millis();
 }
 
-
 float windsensor() {
 
   detachInterrupt(input_pin_wind);
@@ -56,7 +55,6 @@ float windsensor() {
   CountReed = 0;
   cycleTime_old = cycleTime;
 
- 
   if (debugOutput) {
     Serial.print("Task Wind running time: ");
     Serial.print(runtime);

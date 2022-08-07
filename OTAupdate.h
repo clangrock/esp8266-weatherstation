@@ -24,7 +24,7 @@ void update_error(int err) {
 }
 
 void do_update(){
-  
+
   WiFiClient espClient; // ???
   if(debugOutput || debugError) Serial.println("do update");
   // auskommentiert  t_httpUpdate_return ret = ESPhttpUpdate.update(update_server, 80, update_uri, firmware_version);
