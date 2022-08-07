@@ -1,22 +1,22 @@
 /*************************************************/
 /* Debugging                                     */
 /*************************************************/
-constexpr bool debugOutput {false};  // set to true for serial OUTPUT
-constexpr bool debugError {true};  // set to true for serial OUTPUT
-constexpr bool debugMeasure {true};// set to true for serial OUTPUT
+constexpr bool debugOutput    {false};  // set to true for serial OUTPUT
+constexpr bool debugError     {true};   // set to true for serial OUTPUT
+constexpr bool debugMeasure   {true};   // set to true for serial OUTPUT
 
 /*************************************************/
 /* Settings for WLAN                             */
 /*************************************************/
-constexpr char* ssid {"xxxxxx"};
-constexpr char* password {"xxxx"};
+constexpr char* ssid        {"xxxxxx"};
+constexpr char* password    {"xxxx"};
 
 /*************************************************/
 /* Pin config                                    */
 /*************************************************/
-constexpr int input_pin_wind        {13};
+constexpr int input_pin_wind        {12};
 constexpr int output_pin_Relay_1    {14};
-constexpr int output_pin_Relay_2    {12};
+constexpr int output_pin_Relay_2    {13};
 constexpr int DS18B20_PIN           {4};     // Pin for DS18B20 on Arduino D2   
 constexpr int TEMPERATURE_PRECISION {9};
 constexpr int DIGITAL_PIN_RAIN      {5};
@@ -34,9 +34,9 @@ constexpr int Config_timeMaxWindSpeed       {60};     // time delay for the max 
 /*************************************************/
 /* OTA Update settings (Over the air update)     */
 /*************************************************/ 
-constexpr char* firmware_version =  "myanemometer_0.0.1";
-constexpr char* update_server =     "myhost";
-constexpr char* update_uri =        "/path/update.php";
+constexpr char* firmware_version  {"myanemometer_0.8.1"};
+constexpr char* update_server     {"myhost"};
+constexpr char* update_uri        {"/path/update.php"};
 
 /*************************************************/
 /* MQTTCloud data                               */

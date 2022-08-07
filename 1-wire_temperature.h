@@ -4,7 +4,6 @@
    Date:    2022-August-06
 */
 
-
 #include <OneWire.h>            // OneWire-Bibliothek einbinden
 #include <DallasTemperature.h>  // DS18B20-Bibliothek einbinden
 
