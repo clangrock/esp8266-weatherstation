@@ -1,21 +1,29 @@
 /* Weatherstation
  * PCE Instruments PCE-WS P 
  * Author:  Christian Langrock
- * Date:    2022-July-31
+ * Date:    2022-August-07
+ * Version: V0.8
  */
 
-#include <ESP8266WiFi.h>
+int ESP8266status {0}; // 0 = startup; 1 = normal run; 2 = WIFI error
+
+// please install the library PubSubClient, TaskScheduler
+#include <Arduino.h>
+#include "datatypes.h"
 #include "myconfig.h"
+#include "statusLed.h"
+#include "wifi.h"
+// functions for MQTT Client
+#include "MQTT.h"
+
+// I/O-functions
 #include "Output_relay.h"
 #include "1-wire_temperature.h"
 #include "OTAupdate.h"
 #include "windsensor.h"
-//#include "datatypes.h"
-#include <PubSubClient.h>
+#include "rain_sensor.h"
 
-// please install the library PubSubClient, TaskScheduler
-#include <Arduino.h>
-#include <ESP8266WiFiMulti.h>
+// Task scheduler
 #define _TASK_SLEEP_ON_IDLE_RUN
 #define _TASK_PRIORITY
 #define _TASK_WDT_IDS
@@ -25,21 +33,19 @@
 float windspeed  {0.0};
 float last_wind_MQTT  {0.0};
 int count_MQTT_Wind {0};
-float returnTemperature {0.0};
+int count_MQTT_reconnect {0};
+
+
 int numberTemperatureSensor {0};
-
-
-// arrays to hold device addresses
-struct DeviceAddress_array Thermometers;
-
-WiFiClient espClient;
-PubSubClient client(espClient);
+float temperatures_old[64] {0.0};
+struct Rain_array RainResult_old;
 
 
 // ************************* Tasks ******************************
 
 Scheduler runner;
 Scheduler runnerHPR; // high priority tasks
+Scheduler runnerCPR; // critical priority tasks
 
 
 // Callback methods prototypes
@@ -47,178 +53,144 @@ void tWindCallback();
 void tMQTTCallback();
 void tRelayOutCallback();
 void t_1_wire_measureCallback();
+void tRainSensorCallback();
+void tLEDCallback();
 
-Task tWind(1000, TASK_FOREVER, &tWindCallback, &runnerHPR);
-Task tMQTT(5000, TASK_FOREVER, &tMQTTCallback, &runner);
-Task tRelayOut (2000, TASK_FOREVER, tRelayOutCallback, &runnerHPR);
-Task t_1_wire_measure (5000, TASK_FOREVER, t_1_wire_measureCallback, &runner);
+Task tWind            (1000, TASK_FOREVER, &tWindCallback,            &runnerCPR);
+Task tMQTT            (5000, TASK_FOREVER, &tMQTTCallback,            &runner);
+Task tRelayOut        (2000, TASK_FOREVER, tRelayOutCallback,         &runnerCPR);
+Task t_1_wire_measure (3560, TASK_FOREVER, t_1_wire_measureCallback,  &runnerHPR);
+Task tRainSensor      (5010, TASK_FOREVER, tRainSensorCallback,       &runnerHPR);
+Task tLED             (250,  TASK_FOREVER, tLEDCallback,              &runner);
 
+// task for wind sensor
 void tWindCallback() {
-  if (debugOutput){
-    Serial.print("task Wind: ");
-    Serial.println(millis());
-  }
+
     // read windsensor
     windspeed = windsensor();
  
 }
 
-// MQTT communication
+// task for MQTT communication
 void tMQTTCallback() {
-  if (debugOutput){
-    Serial.print("task MQTT: ");
-    Serial.println(millis());
-  }
-    // do_update(); OTA update disabled
-    client.setServer(mqtt_host, mqtt_port);
-
-    if (!client.connected()) {
-      reconnect();
+  // reconnect only after 10 runs
+    if (count_MQTT_reconnect >= 10){
+      if (!client.connected()) {
+          reconnect();
+      }
+      count_MQTT_reconnect = 0;
     }
        // publish wind speed
        count_MQTT_Wind++;
-       if (last_wind_MQTT - windspeed > 0.8 || last_wind_MQTT - windspeed < -0.8 || count_MQTT_Wind >= 10){
+       if (last_wind_MQTT - windspeed > 0.8 || last_wind_MQTT - windspeed < -0.8 || count_MQTT_Wind >= 6){
              MQTT_puplish_float (strMQTTTopic_wind, windspeed);
              count_MQTT_Wind = 0;
        }
-
-      client.loop();
-     
+      count_MQTT_reconnect++;
+      client.loop();      
 }
 
-// relay output
+// task for relay output
 void tRelayOutCallback(){
-  if (debugOutput){
-   Serial.print("task Relay output: ");
-   Serial.println(millis());
-  }
    wind_max(windspeed);
 }
-  
-void t_1_wire_measureCallback(){
 
+// Task for one-Wire temperature
+void t_1_wire_measureCallback(){
+  // call sensors.requestTemperatures() to issue a global temperature
+  sensors.requestTemperatures();
   char* chrBuffer_Temp {""};
   char chrNumber[2];
+  float returnTemperature {0.0};
 
-  if (debugOutput){
-    Serial.print("task 1-Wire temprature: "); 
-    Serial.println(millis());
-      Serial.print("Prefix: ");
-  Serial.println(strMQTTTopic_Temp);
-  }
-  int deviceNumber {0};
   
   for (uint8_t i = 0; i < numberTemperatureSensor; i++){
-    returnTemperature = 0.0;
+    returnTemperature = -100.0;
     returnTemperature = read_Temperature(i); 
-    chrBuffer_Temp = strMQTTTopic_Temp;
-    //chrNumber[1] = "";
+    strcpy(chrBuffer_Temp, strMQTTTopicTemp);
     String strBufferT = String(i);
     strBufferT.toCharArray(chrNumber,2);
     strcat(chrBuffer_Temp, chrNumber);
-    Serial.println(chrBuffer_Temp);
-    if (debugOutput){
-      Serial.print("Temp_");
-      Serial.print(i, DEC);
-      Serial.print(": ");
-      Serial.println(returnTemperature, DEC);
+    
+    if(temperatures_old[i] != returnTemperature){
+      MQTT_puplish_float (chrBuffer_Temp, returnTemperature);  
     }
-    MQTT_puplish_float (chrBuffer_Temp, returnTemperature);
+    temperatures_old[i] = returnTemperature;
   }
-  /*
-      char* strMQTTTopic_temp {mqtt_topic_prefix};
-      char* chrSubTopic {"/temp"};
-      char chrNumber[6];
-      String strBuffer;
-      strBuffer = String(number);
-      strBuffer.toCharArray(chrNumber,6);
+}
 
-      strcat(strMQTTTopic_temp, chrSubTopic);
-      strcat(strMQTTTopic_temp,"_");
-      strcat(strMQTTTopic_temp, chrNumber);
-  */
+// task for rain sensor
+void tRainSensorCallback(){
+  struct Rain_array RainResult;
+  // reade rain sensor
+  RainResult = check_raining();
+
+  // send with MQTT
+  if (RainResult_old.Moisture != RainResult.Moisture ){
+    MQTT_puplish_float (mqtt_topic_rain_Moisture, RainResult.Moisture);
+  }
+
+  if (RainResult_old.Result != RainResult.Result ){
+    MQTT_puplish_char(mqtt_topic_rain, RainResult.Result);
+  }
+  
+  // save state
+  RainResult_old = RainResult;
+  }
+
+void tLEDCallback(){
+  
+  if (!client.connected()) {
+    ESP8266status = 2;
+  }
+  else{
+    ESP8266status = 1;
+  }
+  // set LED 
+  StatusLed(ESP8266status);
 }
 
 
-// ********************  WIFI  ********************
-
-// More events: https://github.com/esp8266/Arduino/blob/master/libraries/ESP8266WiFi/src/ESP8266WiFiGeneric.h
-
-void onSTAConnected(WiFiEventStationModeConnected e /*String ssid, uint8 bssid[6], uint8 channel*/) {
-  Serial.printf("WiFi Connected: SSID %s @ BSSID %.2X:%.2X:%.2X:%.2X:%.2X:%.2X Channel %d\n",
-    e.ssid.c_str(), e.bssid[0], e.bssid[1], e.bssid[2], e.bssid[3], e.bssid[4], e.bssid[5], e.channel);
- }
-
-void onSTADisconnected(WiFiEventStationModeDisconnected e /*String ssid, uint8 bssid[6], WiFiDisconnectReason reason*/) {
-  Serial.printf("WiFi Disconnected: SSID %s BSSID %.2X:%.2X:%.2X:%.2X:%.2X:%.2X Reason %d\n",
-    e.ssid.c_str(), e.bssid[0], e.bssid[1], e.bssid[2], e.bssid[3], e.bssid[4], e.bssid[5], e.reason);
-  // Reason: https://github.com/esp8266/Arduino/blob/master/libraries/ESP8266WiFi/src/ESP8266WiFiType.h
-}
-
-void onSTAGotIP(WiFiEventStationModeGotIP e /*IPAddress ip, IPAddress mask, IPAddress gw*/) {
-  Serial.printf("WiFi GotIP: localIP %s SubnetMask %s GatewayIP %s\n",
-    e.ip.toString().c_str(), e.mask.toString().c_str(), e.gw.toString().c_str());
-}
-
-
-void initWiFi(){
-  static WiFiEventHandler e1, e2, e4;
-  WiFi.disconnect(true);
-  delay(1000);
-  WiFi.persistent(false);
-  WiFi.mode(WIFI_STA);
-  WiFi.setAutoReconnect(true);
-    // WiFi events
-  e1 = WiFi.onStationModeConnected(onSTAConnected);
-  e2 = WiFi.onStationModeDisconnected(onSTADisconnected);
-  e4 = WiFi.onStationModeGotIP(onSTAGotIP);
-  WiFi.begin(ssid, password);   // WiFi connect
-  Serial.println("Waiting for WIFI network...");
-}
-
-
+// *********************************** Setup ****************************************************
 void setup() {
   Serial.begin(115200);
   delay(10);
-  pinMode(input_pin_wind, INPUT_PULLUP);//D4
-  pinMode(output_pin_Relay_1, OUTPUT); // D5 
-  pinMode(output_pin_Relay_2, OUTPUT); // D6 
+  initStatusLed();
+
   // We start by connecting to a WiFi network
   initWiFi();
 
-  initWindsensor();
-
   // set priority, higher is better
-  tMQTT.setId(50);
+  tMQTT.setId(100);
+  tLED.setId(50); 
   t_1_wire_measure.setId(150);
-  tWind.setId(600);
+  tWind.setId(1000);
   tRelayOut.setId(500);
+  tRainSensor.setId(160);
   
   delay(5000);
+  initWindsensor();
+  initRelays();
+  init_rain_sensor();
 
   runner.setHighPriorityScheduler(&runnerHPR); 
+  runnerHPR.setHighPriorityScheduler(&runnerCPR); 
   runner.enableAll(true); // this will recursively enable the higher priority tasks as well
   
   client.setServer(mqtt_host, mqtt_port);
-//  do_update();
-
-  numberTemperatureSensor = Init_temprature();
- // copy on-wire addresses to a byte array
- Thermometers = Temperature_storeDeviceAddress();
- if (debugOutput){
-    for (uint8_t i = 0; i < numberTemperatureSensor; i++ ){
-      Serial.print("Sensor Adress ");
-      Serial.print(i);
-      Serial.print(": ");
-      for (uint8_t y = 0; y < 8; y++){
-        Serial.print(Thermometers.Address[i][y], HEX);
-      }
-      Serial.println(" ");
-    }
- }
   reconnect();
+  //  do_update();
+  // init One-Wire
+  numberTemperatureSensor = Init_temperature();
   
-  attachInterrupt(input_pin_wind,Interrupt,RISING);
+  // MQTT Topic for number of temperatur sensors
+  // send number of Temperaturesensors 
+  char* MQTTTempNumberTopic {mqtt_topic_temperature_sensors};
+  if(debugOutput){
+    Serial.print("MQTT number topic: ");
+    Serial.println(MQTTTempNumberTopic);
+  }
+  MQTT_puplish_float(MQTTTempNumberTopic ,numberTemperatureSensor);
 }
 
 
@@ -228,50 +200,4 @@ void loop()
   runner.execute();
 
   yield();
-}
-
-
-void reconnect() {
-  // Loop until we're reconnected
-  if (!client.connected()) {
-    if(debugOutput) Serial.print("Attempting MQTT connection...");
-    // Create a random client ID
-    String clientId = mqtt_id + String("-");
-    clientId += String(random(0xffff), HEX);
-    // Attempt to connect
-    if (client.connect(clientId.c_str())) {
-      if(debugOutput) Serial.println("connected");
-      // Once connected, publish an announcement...
-      //client.publish("outTopic", "hello world");
-      // ... and resubscribe
-      //client.subscribe("inTopic");
-    } else {
-      if(debugOutput){
-        Serial.print("failed, rc=");
-        Serial.print(client.state());
-        Serial.println(" try again in 5 seconds");
-      }
-    }
-  }
-}
-
-bool MQTT_puplish_float (char* strMQTTTopic, float fMQTTValue) {
-      bool Com_Ok  {false};
-      char charBuffer[32];
-      String strBuffer;
-      strBuffer =  String(fMQTTValue);
-      strBuffer.toCharArray(charBuffer,10);
-      
-      if (!client.publish(strMQTTTopic, charBuffer, false))
-      {
-        if(debugOutput) {
-          Serial.print("Can not publish to MQTT Broker: ");
-          Serial.print(strMQTTTopic);
-          Serial.print(" ");
-        }
-      }
-      else{
-        Com_Ok = true;
-      }
-      return Com_Ok;
 }

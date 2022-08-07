@@ -26,7 +26,7 @@ void update_error(int err) {
 void do_update(){
   
   WiFiClient espClient; // ???
-  if(debugOutput) Serial.println("do update");
+  if(debugOutput || debugError) Serial.println("do update");
   // auskommentiert  t_httpUpdate_return ret = ESPhttpUpdate.update(update_server, 80, update_uri, firmware_version);
   // ab hier geändert
   // Add optional callback notifiers
@@ -37,7 +37,7 @@ void do_update(){
   t_httpUpdate_return ret = ESPhttpUpdate.update(espClient, update_uri, firmware_version);
   switch(ret) {
     case HTTP_UPDATE_FAILED:
-        if(debugOutput) Serial.println("[update] Update failed.");
+        if(debugError) Serial.println("[update] Update failed.");
         break;
     case HTTP_UPDATE_NO_UPDATES:
         if(debugOutput )Serial.println("[update] no Update needed");
