@@ -12,7 +12,7 @@ The following hardware is used for building this project:
 * Temperature sensors DS18B20: https://www.az-delivery.de/products/2xds18b20wasserdicht 
 
 # Wiring
-see the wireing diagramm: wire_diagramm.pdf
+see the wiring diagramm: [a relative link](wire_diagramm.pdf)
 
 # Software
 For using this software you have to copy the myconfig_samples.h to myconfig.h and change the values for the MQTT server and the WLAN settings.
