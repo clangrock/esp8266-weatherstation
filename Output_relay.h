@@ -1,7 +1,9 @@
 /* Output with relay
 
    Author:  Christian Langrock
-   Date:    2022-July-31
+   Date:    2022-August-22
+   new functions toggleRelays() and 
+   void wind_max_max()
 */
 
 int timeMaxWindSpeed = 0;
@@ -15,6 +17,25 @@ void initRelays() {
   // switch off the relays at startup
   digitalWrite(output_pin_Relay_1, HIGH);
   digitalWrite(output_pin_Relay_2, HIGH);
+}
+
+
+void toggleRelays(){
+    // toggle relays
+  if (relay) {
+    digitalWrite(output_pin_Relay_1, LOW);
+    digitalWrite(output_pin_Relay_2, LOW);
+  }
+  else {
+    digitalWrite(output_pin_Relay_1, HIGH);
+    digitalWrite(output_pin_Relay_2, HIGH);
+  }
+}
+
+void wind_max_max(){
+  relay = true;
+  timeMaxMaxWindSpeed = Config_timeMaxMaxWindSpeed;
+  toggleRelays();
 }
 
 void wind_max(int wind) {
@@ -50,12 +71,5 @@ void wind_max(int wind) {
     relay = false;
   }
   // toggle relays
-  if (relay) {
-    digitalWrite(output_pin_Relay_1, LOW);
-    digitalWrite(output_pin_Relay_2, LOW);
-  }
-  else {
-    digitalWrite(output_pin_Relay_1, HIGH);
-    digitalWrite(output_pin_Relay_2, HIGH);
-  }
+  toggleRelays();
 }

@@ -1,8 +1,8 @@
 /* Weatherstation
    PCE Instruments PCE-WS P
    Author:  Christian Langrock
-   Date:    2022-August-07
-   Version: V0.8.1
+   Date:    2022-August-21
+   Version: V0.8.2
 */
 
 int ESP8266status {0}; // 0 = startup; 1 = normal run; 2 = WIFI error
@@ -31,6 +31,7 @@ int ESP8266status {0}; // 0 = startup; 1 = normal run; 2 = WIFI error
 #include <TaskScheduler.h>
 
 float windspeed  {0.0};
+float last_windspeed  {0.0};
 float last_wind_MQTT  {0.0};
 int count_MQTT_Wind {0};
 int count_MQTT_reconnect {0};
@@ -67,6 +68,12 @@ Task tLED             (250,  TASK_FOREVER, tLEDCallback,              &runner);
 void tWindCallback() {
   // read windsensor
   windspeed = windsensor();
+  
+// if the windspeed increases very fast, trigger the relay task
+  if (((windspeed + 30.0) > last_windspeed) && (windspeed > Config_max_max_wind_speed ) ) {
+    wind_max_max();
+  }
+ last_windspeed = windspeed;
 }
 
 // task for MQTT communication
@@ -78,6 +85,7 @@ void tMQTTCallback() {
     }
     count_MQTT_reconnect = 0;
   }
+  
   // publish wind speed
   count_MQTT_Wind++;
   if (last_wind_MQTT - windspeed > 0.8 || last_wind_MQTT - windspeed < -0.8 || count_MQTT_Wind >= 6) {
@@ -100,7 +108,6 @@ void t_1_wire_measureCallback() {
   char* chrBuffer_Temp {""};
   char chrNumber[2];
   float returnTemperature {0.0};
-
 
   for (uint8_t i = 0; i < numberTemperatureSensor; i++) {
     returnTemperature = -100.0;
@@ -196,6 +203,5 @@ void loop()
 {
   // Task execute
   runner.execute();
-
   yield();
 }
